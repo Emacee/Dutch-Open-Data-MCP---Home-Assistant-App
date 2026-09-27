@@ -1,0 +1,29 @@
+Dutch Open Data MCP (Home Assistant add-on)
+Copyright 2026 the add-on authors
+
+This add-on packages and runs NL-GOV-MCP, which it installs at build time
+as a pinned dependency. It is an independent project: not affiliated with,
+endorsed by, or supported by WAINUT B.V.
+
+The NOTICE of the packaged work follows, retained as Apache License 2.0
+Section 4(d) requires.
+
+-------------------------------------------------------------------------
+
+NL-GOV-MCP
+Copyright © 2026 WAINUT B.V.
+
+This product was created and is maintained by WAINUT (https://wainut.ai).
+
+WAINUT is your one-stop AI shop in the Netherlands. We help organizations
+adopt AI and build an AI-enabled workforce — from recruiting the right talent,
+to implementing the right tools, to training teams that actually use them.
+
+NL-GOV-MCP is free and open source. For custom implementations, tailor-made
+integrations with Dutch government data sources, managed deployments, or
+AI consulting and training: visit https://wainut.ai or contact info@wainut.ai
+
+Exploring AI for your organization? → wainut.ai — Unleash Your Potential.
+
+This NOTICE file must be included in all copies or derivative works as
+required by the Apache License 2.0, Section 4(d).

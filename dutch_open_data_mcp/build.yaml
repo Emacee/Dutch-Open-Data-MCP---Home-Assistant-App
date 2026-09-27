@@ -1,0 +1,9 @@
+# Alpine 3.22 rather than 3.20: 3.20 ships Node 20, while nl-gov-mcp
+# declares engines.node ">=22". The Dockerfile and gateway.mjs both report
+# the Node version they actually get, so if this tag still lands below 22
+# it shows up in the build log and the add-on log instead of going unnoticed.
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.22
+  amd64: ghcr.io/home-assistant/amd64-base:3.22
+labels:
+  io.hass.type: addon

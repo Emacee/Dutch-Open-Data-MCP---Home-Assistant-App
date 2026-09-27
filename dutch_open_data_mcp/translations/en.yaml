@@ -1,0 +1,45 @@
+configuration:
+  mcp_url:
+    name: MCP client URL
+    description: >-
+      Informational only — the add-on doesn't read this back. Paste it into
+      your MCP client as the server URL, without the token: put the bearer
+      token (below) in a separate "Authorization: Bearer <token>" header
+      instead, never appended to this URL. Update it here if you point a
+      different hostname at this add-on. Also shown, together with the
+      token, on the add-on's ingress dashboard (open it from the sidebar or
+      the add-on's "Open Web UI" button).
+  mcp_auth_token:
+    name: Bearer token
+    description: >-
+      Shared secret clients must send as "Authorization: Bearer <token>".
+      Leave blank and the add-on generates one on first start and saves it
+      back here for you — refresh this tab after starting it once to see
+      the value. Set your own here at any time to override it; whatever
+      you set is saved with the rest of this add-on's configuration and
+      survives restarts/updates. Clients that only support OAuth (e.g. the
+      Claude iOS app) ask for this same token once, on the add-on's own
+      /authorize consent page, instead of a header field — see DOCS.
+  timezone:
+    name: Timezone
+    description: >-
+      Default timezone used for date/time parsing (e.g. by the nl_gov_ask
+      tool). Defaults to Europe/Amsterdam.
+  log_level:
+    name: Log level
+    description: debug, info, warning or error.
+  show_secrets_in_ui:
+    name: Show secrets in the add-on's web UI
+    description: >-
+      Off by default. Home Assistant Ingress is reachable by every
+      logged-in user, not only administrators, and it does not tell the
+      add-on who is looking — so by default the web UI never displays the
+      bearer token or your API keys, and key fields there are write-only
+      (you can set a key, not read it back). Turn this on only if every
+      Home Assistant user on this installation may see those secrets.
+  api_keys:
+    name: Source API keys
+    description: >-
+      Optional per-source API keys. Leave a field blank to skip that source
+      entirely — its tools are removed from the MCP tool list instead of
+      failing when called. See DOCS for which tools each key unlocks.
