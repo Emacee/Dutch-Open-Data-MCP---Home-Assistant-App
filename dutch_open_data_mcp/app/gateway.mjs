@@ -655,7 +655,7 @@ app.post("/messages", requireBearerAuth, async (req, res) => {
 // McpServer with every tool registered, so without eviction this map grows
 // for the lifetime of the process. Idle sessions are swept, and the total is
 // capped so a misbehaving client cannot pile them up faster than that.
-const SESSION_IDLE_MS = 30 * 60 * 1000;
+const SESSION_IDLE_MS = 15 * 60 * 1000;
 const MAX_SESSIONS = 100;
 const httpSessions = new Map(); // sessionId -> { server, transport, lastSeen }
 
@@ -673,7 +673,7 @@ setInterval(() => {
   for (const [sid, session] of httpSessions) {
     if (session.lastSeen < cutoff) closeSession(sid, "idle");
   }
-}, 5 * 60 * 1000).unref();
+}, 60 * 1000).unref(); // swept every minute, so a session closes 15–16 min after its last request
 
 app.all("/mcp", requireBearerAuth, async (req, res) => {
   if (req.method === "DELETE") {

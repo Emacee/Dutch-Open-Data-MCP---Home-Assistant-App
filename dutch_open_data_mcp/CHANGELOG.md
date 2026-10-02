@@ -48,7 +48,8 @@ Efficiency, security and dependency review.
 - Accepts `bearer` in any letter case, per RFC 7235.
 
 **Efficiency**
-- MCP sessions are now evicted after 30 minutes idle and capped at 100.
+- MCP sessions are now closed after 15 minutes without a request (checked
+  every minute) and capped at 100.
   Sessions only ended on an explicit `DELETE`, which most clients never
   send, and each holds a full server with every tool registered, so memory
   grew for as long as the add-on ran.
