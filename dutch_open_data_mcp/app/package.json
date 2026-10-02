@@ -1,18 +1,18 @@
 {
-  "name": "ha-nlgov-mcp-gateway",
-  "version": "0.1.0",
+  "name": "dutch-open-data-mcp",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Thin auth + tool-gating gateway around WAINUTAI/NL-GOV-MCP for Home Assistant.",
+  "description": "Auth + tool-gating wrapper around WAINUTAI/NL-GOV-MCP, packaged as a Home Assistant add-on.",
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "express": "5.2.1",
-    "nl-gov-mcp": "git+https://github.com/WAINUTAI/NL-GOV-MCP.git#8ba92d75b5c9b6221b8c87fff5ecc932f95ef122"
+    "nl-gov-mcp": "git+https://github.com/WAINUTAI/NL-GOV-MCP.git#f875a21a48a21feee71e661eedb48d2a8b851b3a"
   },
   "overrides": {
-    "@modelcontextprotocol/sdk": "1.30.0"
+    "@modelcontextprotocol/sdk": "1.31.0"
   }
 }

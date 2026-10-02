@@ -115,6 +115,12 @@ const SOURCE_INFO = [
   { envVar: "NS_API_KEY", label: "NS Reisinformatie", url: "https://apiportal.ns.nl/" },
   { envVar: "DNB_API_KEY", label: "DNB Statistics", url: "https://api.portal.dnb.nl/" },
   { envVar: "BAG_API_KEY", label: "BAG (adresdetails — altijd actief, deze sleutel verbetert alleen de kwaliteit)", url: "https://formulieren.kadaster.nl/aanvraag_bag_api_individuele_bevragingen_1" },
+  // Optional: LiDO documents its link list as account-only but does not
+  // currently enforce it, so lido_verwijzingen_lijst works without these and
+  // is never withheld. Set both and upstream sends HTTP Basic auth, which
+  // keeps the tool working if LiDO starts enforcing.
+  { envVar: "LIDO_USERNAME", label: "LiDO gebruikersnaam (optioneel — nu nog niet verplicht)", url: "https://linkeddata.overheid.nl" },
+  { envVar: "LIDO_PASSWORD", label: "LiDO wachtwoord (optioneel, samen met gebruikersnaam)", url: "" },
 ];
 
 // Known key-gated tools, derived by reading upstream's src/tools.ts (pinned
@@ -197,27 +203,38 @@ function log(level, msg, extra) {
 const skippedTools = [];
 const enabledGatedTools = [];
 const publishedTools = [];
+// Gating is decided once per tool name and reused: keys are read at startup
+// and never change in-process, but every MCP session builds a fresh server
+// and re-registers every tool, so without this each session would re-scan
+// ~60 descriptions and re-run the bookkeeping below.
+const gateDecision = new Map();
+
+function decideGate(name, description) {
+  const required = requiredKeysFor(name, description);
+  const missing = required.filter((key) => !isKeyConfigured(key));
+  if (missing.length > 0) {
+    skippedTools.push({
+      tool: name,
+      requires: missing.join(", "),
+      reason: missing.map((key) => `${key}: ${keyStatus.get(key).reason}`).join("; "),
+    });
+    return false;
+  }
+  if (required.length > 0) enabledGatedTools.push(name);
+  publishedTools.push(name);
+  return true;
+}
+
 const originalRegisterTool = McpServer.prototype.registerTool;
 McpServer.prototype.registerTool = function patchedRegisterTool(name, config, ...rest) {
-  const required = requiredKeysFor(name, config?.description);
-  const missing = required.filter((key) => !isKeyConfigured(key));
-
-  if (missing.length > 0) {
-    if (!skippedTools.some((t) => t.tool === name)) {
-      skippedTools.push({
-        tool: name,
-        requires: missing.join(", "),
-        reason: missing.map((key) => `${key}: ${keyStatus.get(key).reason}`).join("; "),
-      });
-    }
-    // Don't call through: the tool is simply never registered on this
-    // McpServer instance, so it never appears in tools/list and can never
-    // be called.
-    return undefined;
+  let publish = gateDecision.get(name);
+  if (publish === undefined) {
+    publish = decideGate(name, config?.description);
+    gateDecision.set(name, publish);
   }
-
-  if (required.length > 0 && !enabledGatedTools.includes(name)) enabledGatedTools.push(name);
-  if (!publishedTools.includes(name)) publishedTools.push(name);
+  // A withheld tool is simply never registered on this McpServer instance,
+  // so it never appears in tools/list and can never be called.
+  if (!publish) return undefined;
   return originalRegisterTool.call(this, name, config, ...rest);
 };
 
@@ -275,12 +292,14 @@ function timingSafeEqualStr(a, b) {
 }
 
 function requireBearerAuth(req, res, next) {
-  const header = req.headers["authorization"] ?? "";
-  const [scheme, token] = header.split(" ");
+  // The auth scheme is case-insensitive (RFC 7235 §2.1), and some clients
+  // send "bearer"; the token itself is compared exactly.
+  const match = /^bearer\s+(\S+)\s*$/i.exec(req.headers["authorization"] ?? "");
+  const token = match?.[1];
   // Accepts either the static shared secret (existing clients: Claude
   // Desktop config, curl, scripts) or a token minted by the OAuth flow in
   // oauth.mjs (clients that only support OAuth, e.g. the Claude iOS app).
-  const valid = scheme === "Bearer" && Boolean(token) && (
+  const valid = Boolean(token) && (
     timingSafeEqualStr(token, AUTH_TOKEN) || isValidOAuthAccessToken(token)
   );
   if (!valid) {
@@ -301,8 +320,13 @@ function requireBearerAuth(req, res, next) {
 const app = express();
 // Cloudflare Tunnel terminates TLS and forwards X-Forwarded-Proto/-For; without
 // this, req.protocol would report "http" and OAuth metadata would advertise
-// the wrong (non-https) issuer/endpoint URLs.
-app.set("trust proxy", true);
+// the wrong (non-https) issuer/endpoint URLs. Trusted only from private
+// addresses — where cloudflared or a LAN reverse proxy connects from — not
+// from anyone: `true` would let any client reaching this port claim https
+// or another client IP. Security-relevant code here never relies on these
+// values anyway (the throttle uses the socket address, OAuth metadata uses
+// mcp_url), so this only affects the fallback when mcp_url is unset.
+app.set("trust proxy", "loopback, linklocal, uniquelocal");
 app.use(express.json({ limit: "1mb" }));
 app.disable("x-powered-by");
 
@@ -626,15 +650,36 @@ app.post("/messages", requireBearerAuth, async (req, res) => {
 });
 
 // --- Streamable HTTP (MCP spec 2025-03-26) ---
-const httpSessions = new Map();
+// A session is only ended explicitly when the client sends DELETE, and most
+// clients never do — they just stop calling. Each session holds a complete
+// McpServer with every tool registered, so without eviction this map grows
+// for the lifetime of the process. Idle sessions are swept, and the total is
+// capped so a misbehaving client cannot pile them up faster than that.
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+const MAX_SESSIONS = 100;
+const httpSessions = new Map(); // sessionId -> { server, transport, lastSeen }
+
+function closeSession(sid, why) {
+  const session = httpSessions.get(sid);
+  if (!session) return;
+  httpSessions.delete(sid);
+  log("debug", "Closing MCP session", { why });
+  // transport.onclose (set at creation) untracks it and closes the server.
+  Promise.resolve(session.transport.close()).catch(() => undefined);
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - SESSION_IDLE_MS;
+  for (const [sid, session] of httpSessions) {
+    if (session.lastSeen < cutoff) closeSession(sid, "idle");
+  }
+}, 5 * 60 * 1000).unref();
 
 app.all("/mcp", requireBearerAuth, async (req, res) => {
   if (req.method === "DELETE") {
     const sessionId = req.headers["mcp-session-id"];
-    const session = sessionId ? httpSessions.get(sessionId) : undefined;
-    if (session) {
-      await session.transport.close();
-      httpSessions.delete(sessionId);
+    if (sessionId && httpSessions.has(sessionId)) {
+      closeSession(sessionId, "client DELETE");
       res.status(200).end();
     } else {
       res.status(404).end();
@@ -649,6 +694,7 @@ app.all("/mcp", requireBearerAuth, async (req, res) => {
       res.status(404).json({ error: "Unknown session" });
       return;
     }
+    session.lastSeen = Date.now();
     await session.transport.handleRequest(req, res, req.body);
     return;
   }
@@ -675,8 +721,21 @@ app.all("/mcp", requireBearerAuth, async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 
   const sid = transport.sessionId;
-  if (sid && !httpSessions.has(sid)) {
-    httpSessions.set(sid, { server, transport });
+  if (!sid) {
+    // initialize was rejected (malformed body, wrong protocol version…), so
+    // no session exists to come back to. Without this the server and
+    // transport stayed in the tracking sets forever.
+    Promise.resolve(transport.close()).catch(() => undefined);
+    return;
+  }
+  if (!httpSessions.has(sid)) {
+    if (httpSessions.size >= MAX_SESSIONS) {
+      // Evict the least recently used session, not merely the oldest.
+      let lruSid, lruSeen = Infinity;
+      for (const [id, s] of httpSessions) if (s.lastSeen < lruSeen) { lruSid = id; lruSeen = s.lastSeen; }
+      closeSession(lruSid, "session cap reached");
+    }
+    httpSessions.set(sid, { server, transport, lastSeen: Date.now() });
   }
 });
 

@@ -4,6 +4,59 @@ Versions below 1.0.0 were developed in a private repository; they are kept
 here because they document why things are the way they are.
 
 
+## 1.1.0
+
+Efficiency, security and dependency review.
+
+**Dependencies**
+- NL-GOV-MCP upstream bumped to `f875a21`. Adds `lido_verwijzingen_lijst`
+  (the actual list of LiDO references, not just counts) plus fixes in the
+  KOOP, LiDO and RIVM connectors. Re-audited for new credentials: the only
+  new ones are an optional LiDO account (see below); the set of key-gated
+  tools is unchanged.
+- `@modelcontextprotocol/sdk` 1.30.0 → 1.31.0. Express 5.2.1 is current.
+  `npm audit`: 0 vulnerabilities before and after.
+- **Added `package-lock.json` and switched the image build to `npm ci`.**
+  Previously every user's build resolved ~120 transitive dependencies
+  fresh, so builds differed between users and a newly published malicious
+  version of a deep dependency could be pulled in. Every build now installs
+  exactly the recorded versions and integrity hashes. (The lockfile pins the
+  upstream git dependency over HTTPS — npm writes `git+ssh://` by default,
+  which would fail on every Home Assistant host, having no SSH key.)
+- New optional `lido_username` / `lido_password` options. Not needed today;
+  the new tool is published without them.
+
+**Security**
+- OAuth tokens are now stored as SHA-256 hashes. `/data` is in every Home
+  Assistant backup, so a plaintext store let anyone holding a backup act as
+  your connected clients. Existing stores are migrated on first start;
+  connected clients keep working.
+- Refresh tokens now rotate on every use and expire after 90 days unused,
+  as OAuth 2.1 requires for public clients. A copied refresh token used to
+  stay valid forever.
+- An option read as null no longer becomes the literal string `"null"`.
+  `bashio::config` prints `null` for a missing or null option, which the
+  add-on used as-is: a null API key counted as configured (publishing a tool
+  that cannot work), and a null `mcp_auth_token` would have made the bearer
+  token the guessable string `null`.
+- `trust proxy` now trusts forwarded headers only from private addresses
+  (where cloudflared or a LAN proxy connects from), not from any client.
+- `/register` flooding can no longer evict the client you actually
+  authorised: eviction now skips clients holding a live refresh token.
+- The image is now built in two stages; `npm` and `git` no longer ship in
+  the runtime image, only `node` and `jq`.
+- Accepts `bearer` in any letter case, per RFC 7235.
+
+**Efficiency**
+- MCP sessions are now evicted after 30 minutes idle and capped at 100.
+  Sessions only ended on an explicit `DELETE`, which most clients never
+  send, and each holds a full server with every tool registered, so memory
+  grew for as long as the add-on ran.
+- A rejected `initialize` no longer leaks its server and transport.
+- The tool gate is decided once per tool, not re-evaluated for every tool
+  on every new session.
+- Checking an OAuth token no longer writes to disk on the request path.
+
 ## 1.0.0
 
 First public release.

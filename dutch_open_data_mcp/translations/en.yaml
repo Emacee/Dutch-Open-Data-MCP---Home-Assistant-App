@@ -42,4 +42,5 @@ configuration:
     description: >-
       Optional per-source API keys. Leave a field blank to skip that source
       entirely — its tools are removed from the MCP tool list instead of
-      failing when called. See DOCS for which tools each key unlocks.
+      failing when called. See DOCS for which tools each key unlocks. The
+      LiDO username/password are optional and not required today.

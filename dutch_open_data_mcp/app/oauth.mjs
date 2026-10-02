@@ -21,25 +21,56 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import express from "express";
 
-const STORE_PATH = "/data/oauth-store.json";
+const STORE_PATH = process.env.OAUTH_STORE_PATH ?? "/data/oauth-store.json";
+const STORE_VERSION = 2;
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Refresh tokens expire after this long unused. Each use issues a new one
+// (rotation, below), so an assistant that is actually being used never hits
+// it; a phone you stopped using stops holding a live credential.
+const REFRESH_TOKEN_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CLIENTS = 200; // basic hygiene cap on the persisted client list
 
+/**
+ * Tokens are stored as SHA-256 hashes, never as themselves. /data — and so
+ * this file — is included in every Home Assistant backup, which people copy
+ * to NAS shares and cloud drives. A plaintext store would let anyone holding
+ * a backup call /mcp as you until the tokens expired or were revoked; hashes
+ * are useless to them. The tokens are 256-bit random, so a plain unsalted
+ * hash is enough — there is nothing to brute-force.
+ */
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function emptyStore() {
-  return { clients: {}, accessTokens: {}, refreshTokens: {} };
+  return { version: STORE_VERSION, clients: {}, accessTokens: {}, refreshTokens: {} };
 }
 
 function loadStore() {
+  let raw;
   try {
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
-    return { ...emptyStore(), ...raw };
+    raw = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
   } catch {
     return emptyStore();
   }
+  const loaded = { ...emptyStore(), ...raw };
+  if (raw.version !== STORE_VERSION) {
+    // v1 keyed tokens by their plaintext value. Re-key by hash so existing
+    // clients keep working across the upgrade, then the plaintext is gone
+    // from disk on the next save.
+    const rekey = (map) => Object.fromEntries(Object.entries(map ?? {}).map(([t, rec]) => [hashToken(t), rec]));
+    loaded.accessTokens = rekey(raw.accessTokens);
+    loaded.refreshTokens = rekey(raw.refreshTokens);
+    loaded.version = STORE_VERSION;
+    store = loaded;
+    saveStore();
+  }
+  return loaded;
 }
 
-let store = loadStore();
+let store;
+store = loadStore();
 
 function saveStore() {
   const tmp = `${STORE_PATH}.tmp`;
@@ -47,10 +78,13 @@ function saveStore() {
   fs.renameSync(tmp, STORE_PATH);
 }
 
-function pruneExpiredAccessTokens() {
+function pruneExpired() {
   const now = Date.now();
-  for (const [token, rec] of Object.entries(store.accessTokens)) {
-    if (rec.expires_at && rec.expires_at < now) delete store.accessTokens[token];
+  for (const [hash, rec] of Object.entries(store.accessTokens)) {
+    if (rec.expires_at && rec.expires_at < now) delete store.accessTokens[hash];
+  }
+  for (const [hash, rec] of Object.entries(store.refreshTokens)) {
+    if ((rec.last_used ?? rec.issued_at) + REFRESH_TOKEN_IDLE_MS < now) delete store.refreshTokens[hash];
   }
 }
 
@@ -207,9 +241,14 @@ export function createOAuthRouter({ getAuthToken, log, publicOrigin }) {
 
     const clientIds = Object.keys(store.clients);
     if (clientIds.length >= MAX_CLIENTS) {
-      // Evict the oldest registered client to make room, rather than
-      // growing the store unbounded from repeated registration attempts.
-      const oldest = clientIds.sort((a, b) => store.clients[a].created_at - store.clients[b].created_at)[0];
+      // Registration is unauthenticated by design (RFC 7591), so make room
+      // by evicting the oldest client that holds no live refresh token.
+      // Plain oldest-first would let anyone flood /register until the
+      // client you actually authorised was pushed out.
+      const active = new Set(Object.values(store.refreshTokens).map((r) => r.client_id));
+      const evictable = clientIds.filter((id) => !active.has(id));
+      const pool = evictable.length > 0 ? evictable : clientIds;
+      const oldest = pool.reduce((a, b) => (store.clients[a].created_at <= store.clients[b].created_at ? a : b));
       delete store.clients[oldest];
     }
 
@@ -367,20 +406,25 @@ export function createOAuthRouter({ getAuthToken, log, publicOrigin }) {
 
     if (body.grant_type === "refresh_token") {
       const { refresh_token, client_id } = body;
-      const rec = typeof refresh_token === "string" ? store.refreshTokens[refresh_token] : undefined;
-      if (!rec || (client_id && rec.client_id !== client_id)) {
+      const hash = typeof refresh_token === "string" ? hashToken(refresh_token) : undefined;
+      const rec = hash ? store.refreshTokens[hash] : undefined;
+      const idle = rec && (rec.last_used ?? rec.issued_at) + REFRESH_TOKEN_IDLE_MS < Date.now();
+      if (!rec || idle || (client_id && rec.client_id !== client_id)) {
         res.status(400).json({ error: "invalid_grant" });
         return;
       }
-      const accessToken = randomBytes(32).toString("hex");
-      const now = Date.now();
-      pruneExpiredAccessTokens();
-      store.accessTokens[accessToken] = { client_id: rec.client_id, issued_at: now, expires_at: now + ACCESS_TOKEN_TTL_MS };
-      saveStore();
+      // Rotation: the presented refresh token is spent and a new one issued.
+      // OAuth 2.1 (§4.3.1) requires rotation or sender-constraining for
+      // public clients, which every client here is — there are no client
+      // secrets. Without it a refresh token copied once (a backup, a
+      // compromised phone) stays valid indefinitely alongside the real one.
+      delete store.refreshTokens[hash];
+      const tokens = issueTokenPair(rec.client_id);
       res.json({
-        access_token: accessToken,
+        access_token: tokens.accessToken,
         token_type: "Bearer",
         expires_in: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
+        refresh_token: tokens.refreshToken,
         scope: "mcp",
       });
       return;
@@ -393,26 +437,25 @@ export function createOAuthRouter({ getAuthToken, log, publicOrigin }) {
 }
 
 function issueTokenPair(clientId) {
-  pruneExpiredAccessTokens();
+  pruneExpired();
   const accessToken = randomBytes(32).toString("hex");
   const refreshToken = randomBytes(32).toString("hex");
   const now = Date.now();
-  store.accessTokens[accessToken] = { client_id: clientId, issued_at: now, expires_at: now + ACCESS_TOKEN_TTL_MS };
-  store.refreshTokens[refreshToken] = { client_id: clientId, issued_at: now };
+  store.accessTokens[hashToken(accessToken)] = { client_id: clientId, issued_at: now, expires_at: now + ACCESS_TOKEN_TTL_MS };
+  store.refreshTokens[hashToken(refreshToken)] = { client_id: clientId, issued_at: now, last_used: now };
   saveStore();
   return { accessToken, refreshToken };
 }
 
-/** Used by gateway.mjs's bearer-auth middleware to accept OAuth-issued tokens too. */
+/**
+ * Used by gateway.mjs's bearer-auth middleware on every MCP request, so it
+ * stays a pure in-memory lookup: an expired token is simply rejected, and
+ * left for pruneExpired() to drop at the next issuance rather than costing a
+ * synchronous disk write on the request path.
+ */
 export function isValidOAuthAccessToken(token) {
-  const rec = store.accessTokens[token];
-  if (!rec) return false;
-  if (rec.expires_at && rec.expires_at < Date.now()) {
-    delete store.accessTokens[token];
-    saveStore();
-    return false;
-  }
-  return true;
+  const rec = store.accessTokens[hashToken(token)];
+  return Boolean(rec) && !(rec.expires_at && rec.expires_at < Date.now());
 }
 
 /** For the ingress dashboard: list registered clients without exposing tokens. */

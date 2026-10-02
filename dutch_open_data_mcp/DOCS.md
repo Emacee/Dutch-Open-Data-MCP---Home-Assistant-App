@@ -93,6 +93,7 @@ upstream's new sources later is a one-line version bump, not a merge.
 | `ns_api_key` | `ns_reisinformatie` | https://apiportal.ns.nl/ |
 | `dnb_api_key` | `dnb_statistics_search` | https://api.portal.dnb.nl/ |
 | `bag_api_key` | *(none — always registered)* | Improves `bag_address_detail` result quality; the tool still works and degrades gracefully without it, so it is never hidden. |
+| `lido_username` + `lido_password` | *(none — always registered)* | Optional LiDO account (https://linkeddata.overheid.nl). LiDO documents its link list as account-only but does not enforce that today, so `lido_verwijzingen_lijst` works without them. Set both and they are sent as HTTP Basic auth, which keeps it working if LiDO starts enforcing. |
 
 The other ~35 connectors (CBS, RDW, PDOK, Tweede Kamer, Rechtspraak, data.overheid.nl,
 Rijksoverheid, Rijkswaterstaat, Luchtmeetnet, DUO, Eurostat, etc.) need no key
@@ -275,8 +276,10 @@ Implementation: `app/oauth.mjs`, a minimal single-user OAuth 2.1
 authorization server — opaque server-side tokens (no JWT/signing), a
 single fixed `mcp` scope, and a flat JSON file
 (`/data/oauth-store.json`, persists across restarts/updates) for
-registered clients and issued tokens. See the comment at the top of that
-file for the reasoning.
+registered clients and issued tokens. Tokens are stored only as SHA-256
+hashes, so the file is useless to anyone who gets hold of a Home Assistant
+backup. Refresh tokens rotate on every use and expire after 90 days unused.
+See the comment at the top of that file for the reasoning.
 
 ## Security
 
@@ -331,7 +334,8 @@ the same place every add-on keeps its secrets. Nothing is sent anywhere
 else, and nothing is written to the add-on's log. `config.yaml` ships every
 one of those fields blank, so nothing is baked into the image or the
 repository. OAuth clients and the tokens issued to them live beside it in
-`/data/oauth-store.json` (mode `0600`).
+`/data/oauth-store.json` (mode `0600`), as SHA-256 hashes rather than the
+tokens themselves — `/data` is included in every Home Assistant backup.
 
 Upstream tool calls do send your API key to the relevant government API —
 that is the point of the key — over HTTPS, to that API only.

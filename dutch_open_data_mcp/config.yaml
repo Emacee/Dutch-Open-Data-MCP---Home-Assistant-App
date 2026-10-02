@@ -1,5 +1,5 @@
 name: "Dutch Open Data MCP"
-version: "1.0.0"
+version: "1.1.0"
 slug: "dutch_open_data_mcp"
 description: >-
   Serve 46 Dutch government open-data sources (CBS, KNMI, RDW, Tweede Kamer,
@@ -76,6 +76,11 @@ options:
     ep_online_api_key: ""
     ns_api_key: ""
     dnb_api_key: ""
+    # Optional LiDO account. Not needed today: LiDO documents its link list
+    # as account-only but does not enforce it yet. Set both to keep
+    # lido_verwijzingen_lijst working if that changes.
+    lido_username: ""
+    lido_password: ""
 schema:
   # str, not url: the Home Assistant Companion (mobile) app's config form
   # doesn't handle the `url` schema type correctly — it silently drops the
@@ -99,3 +104,5 @@ schema:
     ep_online_api_key: password?
     ns_api_key: password?
     dnb_api_key: password?
+    lido_username: str?
+    lido_password: password?
