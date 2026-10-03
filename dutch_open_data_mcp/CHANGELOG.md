@@ -4,6 +4,15 @@ Versions below 1.0.0 were developed in a private repository; they are kept
 here because they document why things are the way they are.
 
 
+## 1.1.1
+
+- New icon and logo (Overheid.nl), shown in the Home Assistant add-on store.
+- The icon is now offered to MCP clients: as `serverInfo.icons` in the
+  initialize response (MCP spec 2025-11-25), and as `/favicon.ico`,
+  `/favicon.png`, `/icon.png` and `/apple-touch-icon.png` on the public
+  hostname. Claude doesn't show icons for custom connectors yet; this is in
+  place for when it does.
+
 ## 1.1.0
 
 Efficiency, security and dependency review.

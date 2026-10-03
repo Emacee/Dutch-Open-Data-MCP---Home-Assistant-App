@@ -34,6 +34,7 @@ import {
   listOAuthClients,
   revokeAllOAuthTokens,
 } from "./oauth.mjs";
+import { iconRoutes, loadIcon, serverIcons, withBranding } from "./branding.mjs";
 
 const PORT = Number(process.env.NL_GOV_HTTP_PORT ?? 8098);
 const INGRESS_PORT = Number(process.env.INGRESS_PORT ?? 8099);
@@ -53,6 +54,10 @@ const PUBLIC_ORIGIN = (() => {
     return "";
   }
 })();
+
+// Shipped next to gateway.mjs by the Dockerfile; see branding.mjs.
+const ICON_PNG = loadIcon(new URL("./icon.png", import.meta.url));
+const SERVER_ICONS = serverIcons(ICON_PNG, PUBLIC_ORIGIN);
 
 // Supervisor's internal API, same one run.sh writes the generated bearer
 // token through. Used so the ingress dashboard can save API keys into the
@@ -239,7 +244,7 @@ McpServer.prototype.registerTool = function patchedRegisterTool(name, config, ..
 };
 
 function createServer() {
-  return createUpstreamServer();
+  return withBranding(createUpstreamServer(), { title: "Dutch Open Data", icons: SERVER_ICONS });
 }
 
 // Resolve the published tool set at startup rather than on first client
@@ -350,6 +355,8 @@ function untrackServer(server, transport) {
 app.get("/health", (_req, res) => {
   res.json({ ok: true, name: "dutch-open-data-mcp" });
 });
+
+iconRoutes(app, ICON_PNG);
 
 // Authenticated: it reports which sources the operator configured and which
 // tools exist, which is a map of the install that an anonymous caller on the

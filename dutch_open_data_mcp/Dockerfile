@@ -56,6 +56,8 @@ COPY app/package.json /app/
 # (oauth.mjs, …), and naming just one here silently ships a broken image
 # that crash-loops on ERR_MODULE_NOT_FOUND the moment a module is added.
 COPY app/*.mjs /app/
+# Served as the favicon and sent to MCP clients as serverInfo.icons.
+COPY icon.png /app/icon.png
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
