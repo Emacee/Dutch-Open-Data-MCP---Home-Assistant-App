@@ -68,19 +68,28 @@ no certificates, nothing exposed to the internet.
 To reach it from a phone or a hosted assistant you need a way in. The add-on
 does not do this itself; use a tunnel or reverse proxy in front of it.
 
-**[Cloudflared add-on](https://github.com/brenner-tobias/ha-addons)** — the
-usual choice, and what this add-on is documented against. It opens an outbound
-tunnel to Cloudflare, so nothing is port-forwarded and no ports are opened on
-your router. You need a domain using Cloudflare for DNS.
+**[Cloudflared add-on](https://github.com/homeassistant-apps/app-cloudflared)** —
+the usual choice, and what this add-on is documented against. It opens an
+outbound tunnel to Cloudflare, so nothing is port-forwarded and no ports are
+opened on your router. You need a domain using Cloudflare for DNS. Its
+repository:
 
 ```
-https://github.com/brenner-tobias/ha-addons
+https://github.com/homeassistant-apps/repository
 ```
 
 Add that repository the same way as above, install **Cloudflared**, then give
-this add-on its own hostname (e.g. `mcp.example.com` → `<HA host>:8098`). The
-full walkthrough, including what to set for `mcp_url`, is in this add-on's
-Documentation tab under *Exposing it to the internet*.
+this add-on **its own subdomain** (e.g. `nlgov-mcp.example.com` →
+`http://<HA host>:8098`): in the Cloudflare dashboard under **Zero Trust →
+Networks → Tunnels →** your tunnel **→ Public hostnames** (*Published
+application routes* in newer dashboards), or in the Cloudflared add-on's
+`additional_hosts`. Set `mcp_url` to `https://nlgov-mcp.example.com/mcp`
+and add that URL as a custom connector in Claude. The full walkthrough is in
+this add-on's Documentation tab under *Exposing it to the internet*.
+
+Running other MCP add-ons too, such as
+[Picnic MCP](https://github.com/Emacee/Picnic-MCP-Home-Assistant-app)? Give
+each its own subdomain the same way; they stay fully independent.
 
 Any other reverse proxy works too, with two requirements: forward the
 `Authorization` header unchanged, and don't buffer responses (the MCP

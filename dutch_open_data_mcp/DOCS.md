@@ -28,8 +28,9 @@ Open WebUI, and so on).
 2. **Decide how clients reach it.**
    - *Local only:* point your client at `http://<HA host>:8098/mcp`. Nothing
      else to do.
-   - *Over the internet:* put a tunnel or reverse proxy in front — see
-     "Exposing it" below — and set `mcp_url` to the public URL.
+   - *Over the internet:* give it its own subdomain through a Cloudflare
+     Tunnel (or another reverse proxy) — see "Exposing it" below — and set
+     `mcp_url` to the public URL, e.g. `https://nlgov-mcp.example.com/mcp`.
 3. **Optionally add API keys** for the handful of sources that need one
    (Configuration tab, or the add-on's own web UI). Sources you skip are
    simply left out; everything else works without any key.
@@ -74,7 +75,7 @@ upstream's new sources later is a one-line version bump, not a merge.
 
 | Option | Description |
 |---|---|
-| `mcp_url` | The public URL clients use, e.g. `https://mcp.example.com/mcp`. Shown on the dashboard for copying, and used as the issuer in the OAuth discovery documents instead of trusting the request's `Host` header — so set it if you expose this publicly. Leave blank for local-only use. Never append the bearer token to it; it goes in an `Authorization` header. |
+| `mcp_url` | The public URL clients use, e.g. `https://nlgov-mcp.example.com/mcp`. Shown on the dashboard for copying, and used as the issuer in the OAuth discovery documents instead of trusting the request's `Host` header — so set it if you expose this publicly. Leave blank for local-only use. Never append the bearer token to it; it goes in an `Authorization` header. |
 | `mcp_auth_token` | Starts blank — no secret is committed to this repo. On first start, `run.sh` generates a random 256-bit token and writes it straight back into this add-on's Configuration via the Supervisor API, so reopening the tab (no restart needed) shows it — no log-digging required. Set your own value here at any time to override it; Home Assistant persists whatever you put here across restarts and updates like any other option. Clients must send `Authorization: Bearer <token>`. |
 | `timezone` | Default timezone for date/time parsing in tools like `nl_gov_ask`. Defaults to `Europe/Amsterdam`. |
 | `log_level` | `debug` \| `info` \| `warning` \| `error`. |
@@ -197,36 +198,66 @@ That port deliberately does **not** go through Home Assistant Ingress — MCP
 clients need a plain URL and a token, not an authenticated browser session.
 Ingress serves only the separate status dashboard, on its own port.
 
-Use a **dedicated hostname** (`mcp.example.com`), not a path under the
-hostname you already use for Home Assistant. Putting it on a path means
-rewriting paths in front of a session-based Streamable HTTP transport,
-which is fragile, and a second hostname costs nothing.
+Give the add-on **its own subdomain**, e.g. `nlgov-mcp.example.com`, not a
+path under the hostname you already use for Home Assistant. Each MCP add-on
+you run (this one, the Picnic MCP add-on, …) gets its own hostname, so they
+stay fully independent — each serves at the root of its hostname with its
+own token and OAuth login, and stopping one never affects another. A
+subdomain costs one extra route in your tunnel and nothing else.
 
-### Steps
+### Cloudflare Tunnel
 
-1. **Add a public hostname to your tunnel.** In the Cloudflare Zero Trust
-   dashboard: **Networks → Tunnels →** your tunnel **→ Public Hostname →
-   Add a public hostname**.
-   - *Subdomain* `mcp` (or whatever you prefer), *Domain* your domain.
-   - *Service type* `HTTP`, *URL* `<your HA host>:8098` — the same address
-     your existing Home Assistant hostname points at, with port `8098`
-     instead. Use the LAN IP or hostname that `cloudflared` can reach; if
-     `cloudflared` runs on the HA host with host networking,
-     `localhost:8098` works too.
-   - Service type stays **HTTP**, not HTTPS: the hop from `cloudflared` to
-     this add-on is inside your own network, and the add-on serves plain
-     HTTP. TLS is terminated by Cloudflare at the edge.
-2. **Save.** Cloudflare creates the DNS record automatically. If you manage
-   routes some other way, the record is a proxied `CNAME` to
-   `<tunnel-id>.cfargotunnel.com`.
-3. **Set `mcp_url`** in the add-on's Configuration to the full endpoint,
-   e.g. `https://mcp.example.com/mcp`. The add-on uses it as the OAuth
-   issuer, so it should match what clients actually call.
-4. **Restart the add-on** and check `https://mcp.example.com/health`
-   returns `{"ok":true,...}`.
+You need a domain whose DNS is on Cloudflare, and the **Cloudflared**
+add-on (repository `https://github.com/homeassistant-apps/repository`).
+Cloudflared opens an outbound tunnel, so no ports are opened on your
+router. How you add a hostname depends on how the tunnel is set up:
+
+**A. Tunnel managed in the Cloudflare dashboard** — the Cloudflared add-on
+has a `tunnel_token` in its Configuration. Routes live in Cloudflare:
+
+1. In the Cloudflare dashboard open **Zero Trust → Networks → Tunnels**,
+   pick your tunnel, then **Edit**.
+2. Open **Public hostnames** (called **Published application routes** in
+   newer dashboards) and **Add a public hostname**:
+   - *Subdomain* `nlgov-mcp` (or whatever you prefer), *Domain* your
+     domain, *Path* empty.
+   - *Service type* `HTTP`, *URL* `<HA host>:8098` — the LAN address your
+     other hostnames already point at, with port 8098.
+   - HTTP, not HTTPS: Cloudflare terminates TLS; the hop inside your
+     network is plain HTTP.
+3. **Save.** Cloudflare creates the DNS record itself (a proxied `CNAME` to
+   `<tunnel-id>.cfargotunnel.com`) and the running Cloudflared add-on picks
+   up the new route without a restart.
+
+**B. Tunnel configured in the Cloudflared add-on** — no `tunnel_token`.
+Add the hostname to the add-on's `additional_hosts` and restart Cloudflared:
+
+```yaml
+additional_hosts:
+  - hostname: nlgov-mcp.example.com
+    service: http://<HA host>:8098
+```
+
+**Then, either way:**
+
+1. Set `mcp_url` in this add-on's Configuration to the full endpoint,
+   `https://nlgov-mcp.example.com/mcp`. The add-on uses it as the OAuth
+   issuer, so it must match what clients actually call.
+2. Restart the add-on and open `https://nlgov-mcp.example.com/health` — it
+   should answer `{"ok":true,...}`.
+3. Connect your client (see *Connecting a client*).
 
 If you change the add-on's host port in the Network tab, update the
 tunnel's service URL to match.
+
+**Troubleshooting**
+
+| You see | Likely cause |
+|---|---|
+| `502` / *Bad gateway* at `/health` | The add-on isn't running, or the service URL has the wrong IP or port. |
+| Cloudflare error *1033* | The tunnel itself is down — check the Cloudflared add-on's log. |
+| `401` on `/mcp` in a browser | Expected — the endpoint needs a token. |
+| Claude can't connect, `/health` works | Check that `mcp_url` is exactly the URL you gave Claude. Cloudflare **Access** or a bot challenge in front of the hostname will also block Claude's login flow. |
 
 ### Not using Cloudflare?
 
@@ -242,14 +273,20 @@ terminates TLS and forwards to `<HA host>:8098`. Two requirements:
 ## Connecting a client
 
 **Clients with a plain header/URL field** (Claude Desktop's `mcpServers`
-config, curl, scripts, Open WebUI): use `https://mcp.example.com/mcp`
+config, curl, scripts, Open WebUI): use `https://nlgov-mcp.example.com/mcp`
 (or `/sse` for the legacy transport) with `Authorization: Bearer <token>`,
 `<token>` being whatever the Configuration tab shows for `mcp_auth_token`.
 Nothing below applies to these — they keep working exactly as before.
 
-**Clients that only offer "OAuth"** (no header field — e.g. the Claude iOS
-app, and likely other mobile/managed MCP connector UIs): add
-`https://mcp.example.com/mcp` as the connector URL and start the
+**Claude (web, desktop, iOS, Android):** on claude.ai go to **Settings →
+Connectors → Add custom connector**, enter
+`https://nlgov-mcp.example.com/mcp` and press **Connect**, then paste
+`mcp_auth_token` on the page that opens. Connectors added on claude.ai
+appear in the desktop and mobile apps as well. What happens underneath:
+
+**Clients that only offer "OAuth"** (no header field — e.g. the Claude
+apps, and likely other mobile/managed MCP connector UIs): add
+`https://nlgov-mcp.example.com/mcp` as the connector URL and start the
 connection. The client will:
 
 1. Get a `401` from `/mcp` with a `WWW-Authenticate` header pointing at
