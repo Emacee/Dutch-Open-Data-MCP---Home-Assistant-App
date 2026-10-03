@@ -5,6 +5,13 @@ This add-on packages and runs NL-GOV-MCP, which it installs at build time
 as a pinned dependency. It is an independent project: not affiliated with,
 endorsed by, or supported by WAINUT B.V.
 
+The add-on's icon and logo (dutch_open_data_mcp/icon.png and logo.png) are
+derived from the Overheid.nl logo, which belongs to the Dutch government.
+They are used only to identify the kind of data the add-on gives access to.
+This add-on is not an official government product and is not affiliated
+with or endorsed by the Dutch government or Overheid.nl; the artwork will
+be replaced on request of the rights holder.
+
 The NOTICE of the packaged work follows, retained as Apache License 2.0
 Section 4(d) requires.
 

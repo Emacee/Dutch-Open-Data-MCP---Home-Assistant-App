@@ -1,5 +1,7 @@
 # Dutch Open Data MCP — Home Assistant add-on
 
+<p align="center"><img src="dutch_open_data_mcp/logo.png" alt="Overheid.nl — Open data van de Overheid" width="300"></p>
+
 Serve **46 Dutch government open-data sources** to AI assistants from your own
 Home Assistant, over the [Model Context Protocol](https://modelcontextprotocol.io).
 CBS, KNMI, RDW, Tweede Kamer, PDOK/BAG, Rechtspraak, Rijkswaterstaat,
@@ -125,6 +127,9 @@ but the relevant government API.
 - *WAINUT* and *NL-GOV-MCP* are trademarks of WAINUT B.V. They are used here
   descriptively, to say what this add-on runs. This project is not endorsed by
   WAINUT.
+- The icon and logo are derived from the Overheid.nl logo and identify the
+  kind of data this add-on serves. This is **not an official government
+  product** and is not endorsed by the Dutch government; see [`NOTICE`](NOTICE).
 - This add-on is licensed [Apache-2.0](LICENSE), matching upstream.
 - The data itself comes from Dutch public bodies under their own terms;
   upstream returns provenance with every result.
